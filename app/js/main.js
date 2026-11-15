@@ -41,6 +41,8 @@
       // false — сайт открывается напрямую в окне приложения (как в официальных Tizen-клиентах),
       // true — внутри iframe (адрес проверяется каждые 15 минут, пока приложение открыто)
       embed: s.embed === true,
+      // Хосты, до которых с этого ТВ не устанавливается HTTPS (устаревшие корневые сертификаты)
+      plainHttp: (s.plainHttp && typeof s.plainHttp === 'object') ? s.plainHttp : {},
       noFrame: (s.noFrame && typeof s.noFrame === 'object') ? s.noFrame : {}
     };
   }
@@ -214,9 +216,79 @@
     currentUrl = url;
     clearTimeout(retryTimer);
     clearTimeout(directTimer);
+    showLoading(true);
+    var token = ++openToken;
+    resolveScheme(url, function (finalUrl) {
+      if (token !== openToken) { return; }
+      if (settingsOpen) { pendingOpenUrl = url; return; } // продолжим после закрытия настроек
+      openedUrl = finalUrl;
+      if (!state.embed || state.noFrame[urlKey(finalUrl)]) { openDirect(finalUrl); } else { openFrame(finalUrl); }
+    });
+  }
 
-    if (!state.embed || state.noFrame[urlKey(url)]) { openDirect(url); return; }
+  /* ----- HTTPS → HTTP для старых телевизоров -----
+   * На ТВ 2017–2019 годов (Tizen 3/4) нет новых корневых сертификатов, и HTTPS-сайт
+   * открывается пустым чёрным экраном. Если HTTPS до сайта не работает, а HTTP работает,
+   * открываем сайт по HTTP (так делало и официальное приложение Kinopub TV). */
+  var openToken = 0, openedUrl = null;
+  var PROBE_TIMEOUT_MS = 4000;
+  var PROBE_PATHS = ['/favicon.ico', '/logo.png', '/favicon.png', '/apple-touch-icon.png'];
 
+  // cb(true), если с этого ТВ удаётся получить ответ от origin
+  function probeOrigin(origin, cb) {
+    var done = false, pending = 0, timer = null;
+    function finish(ok) {
+      if (done) { return; }
+      done = true;
+      clearTimeout(timer);
+      cb(ok);
+    }
+    function fail() { pending--; if (pending <= 0) { finish(false); } }
+    timer = setTimeout(function () { finish(false); }, PROBE_TIMEOUT_MS);
+    var bust = '?_=' + new Date().getTime();
+    pending++;
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', origin + '/' + bust, true);
+      xhr.onreadystatechange = function () {
+        if (done) { return; }
+        if (xhr.readyState >= 2 && xhr.status > 0) { finish(true); try { xhr.abort(); } catch (e) { /* ignore */ } }
+        else if (xhr.readyState === 4) { fail(); }
+      };
+      xhr.send(null);
+    } catch (e) { fail(); }
+    for (var i = 0; i < PROBE_PATHS.length; i++) {
+      pending++;
+      var img = new Image();
+      img.onload = function () { finish(true); };
+      img.onerror = fail;
+      img.src = origin + PROBE_PATHS[i] + bust;
+    }
+  }
+
+  function resolveScheme(url, cb) {
+    var m = /^https:\/\/([^\/?#]+)(.*)$/i.exec(url);
+    if (!m) { cb(url); return; }
+    var host = m[1].toLowerCase();
+    var httpUrl = 'http://' + m[1] + m[2];
+    probeOrigin('https://' + m[1], function (ok) {
+      if (ok) {
+        if (state.plainHttp[host]) { delete state.plainHttp[host]; saveState(); }
+        cb(url);
+        return;
+      }
+      probeOrigin('http://' + m[1], function (okHttp) {
+        if (okHttp) {
+          if (!state.plainHttp[host]) { state.plainHttp[host] = true; saveState(); }
+          cb(httpUrl);
+        } else {
+          cb(state.plainHttp[host] ? httpUrl : url); // нет связи — как в прошлый раз
+        }
+      });
+    });
+  }
+
+  function openFrame(url) {
     showLoading(true);
     frameLoaded = false;
 
@@ -286,7 +358,7 @@
         if (blocked && !state.noFrame[k]) {
           state.noFrame[k] = true;
           saveState();
-          if (sameUrl(url, currentUrl)) { openDirect(url); }
+          if (sameUrl(url, openedUrl)) { openDirect(url); }
         } else if (!blocked && state.noFrame[k] && xhr.status) {
           delete state.noFrame[k];
           saveState();
@@ -580,7 +652,10 @@
       statusEl.appendChild(s);
     }
     if (statusMsg) { line(statusMsg.text, statusMsg.cls); }
-    line('Адрес: ' + (currentUrl || targetUrl()) + ' (' + targetSource() + ')');
+    var shown = currentUrl || targetUrl();
+    var hm = /^https:\/\/([^\/?#]+)/i.exec(shown);
+    line('Адрес: ' + shown + ' (' + targetSource() + ')' +
+      (hm && state.plainHttp[hm[1].toLowerCase()] ? ' — HTTPS на этом ТВ не работает, открывается по HTTP' : ''));
     if (state.remoteUrl) { line('Адрес в GitHub: ' + state.remoteUrl); }
     line('Проверка GitHub: ' + fmtTime(state.lastCheck) +
       (state.lastCheck ? (state.lastCheckOk ? ' — успешно' : ' — ошибка (' + state.lastError + ')') : ''));
