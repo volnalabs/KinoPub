@@ -316,6 +316,14 @@
     var u = pendingDirectUrl;
     pendingDirectUrl = null;
     window.location.replace(u);
+    // Если телевизор не дал перейти на сайт, страница приложения остаётся на экране —
+    // показываем причину и повторяем попытку
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(function () {
+      showLoading(true, 'Не удалось открыть ' + u + ' — повтор… Удерживайте OK — настройки');
+      pendingDirectUrl = u;
+      directTimer = setTimeout(goDirect, 15000);
+    }, 15000);
   }
 
   function applyTarget(force) {
