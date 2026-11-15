@@ -112,12 +112,12 @@ html, body {
 .title {
   font-size: 3.4vh;
   font-weight: bold;
-  margin-bottom: 2.5vh;
+  margin-bottom: 1.8vh;
 }
 .item {
   position: relative;
-  margin-top: 1.2vh;
-  padding: 1.6vh 2vh;
+  margin-top: 1vh;
+  padding: 1.3vh 2vh;
   border-radius: 1vh;
   background: #23262d;
   font-size: 2.4vh;

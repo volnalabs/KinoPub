@@ -38,6 +38,9 @@
       lastCheck: +s.lastCheck || 0,
       lastCheckOk: !!s.lastCheckOk,
       lastError: typeof s.lastError === 'string' ? s.lastError : '',
+      // false — сайт открывается напрямую в окне приложения (как в официальных Tizen-клиентах),
+      // true — внутри iframe (адрес проверяется каждые 15 минут, пока приложение открыто)
+      embed: s.embed === true,
       noFrame: (s.noFrame && typeof s.noFrame === 'object') ? s.noFrame : {}
     };
   }
@@ -212,7 +215,7 @@
     clearTimeout(retryTimer);
     clearTimeout(directTimer);
 
-    if (state.noFrame[urlKey(url)]) { openDirect(url); return; }
+    if (!state.embed || state.noFrame[urlKey(url)]) { openDirect(url); return; }
 
     showLoading(true);
     frameLoaded = false;
@@ -293,20 +296,23 @@
     } catch (e) { /* ignore */ }
   }
 
-  // Сайт запрещает встраивание: открываем его напрямую в окне приложения.
-  // Настройки в этом режиме доступны при запуске (удержание OK на экране загрузки).
+  // Прямой режим: сайт загружается в само окно приложения (без iframe).
+  // Настройки доступны при запуске — удержанием OK на экране загрузки.
   function openDirect(url) {
     if (frame && frame.parentNode) { frame.parentNode.removeChild(frame); }
     frame = null;
+    frameLoaded = false;
     pendingDirectUrl = url;
     showLoading(true, HINT_TEXT);
-    probeFraming(url);
+    if (state.embed) { probeFraming(url); }
     clearTimeout(directTimer);
-    directTimer = setTimeout(goDirect, 2000);
+    directTimer = setTimeout(goDirect, 0);
   }
 
   function goDirect() {
-    if (!pendingDirectUrl || settingsOpen) { return; }
+    clearTimeout(directTimer);
+    if (!pendingDirectUrl || settingsOpen) { return; } // продолжится после закрытия настроек
+    if (hold.active) { directTimer = setTimeout(goDirect, 200); return; } // ждём окончания окна настроек
     var u = pendingDirectUrl;
     pendingDirectUrl = null;
     window.location.replace(u);
@@ -356,7 +362,7 @@
     clearTimeout(hold.timer);
     // OK ещё удерживается — ждём, чем закончится нажатие
     // или пока виден экран загрузки
-    if ((press.active && !press.fired) || loadingEl.className.indexOf('hidden') === -1) {
+    if ((press.active && !press.fired) || (frame && !frameLoaded)) {
       hold.timer = setTimeout(releaseHold, 250);
       return;
     }
@@ -448,7 +454,7 @@
 
     stopEvent(e);
     if (code === KEY.ENTER) { enterDown(e); return; }
-    if ((code === KEY.BACK || code === KEY.ESC) && !(frame && frameLoaded) && !pendingDirectUrl) {
+    if ((code === KEY.BACK || code === KEY.ESC) && !(frame && frameLoaded)) {
       exitApp();
       return;
     }
@@ -493,12 +499,13 @@
   /* ===================== Настройки ===================== */
 
   var settingsEl, items, focusIndex = 0, settingsOpen = false;
-  var inputEl, switchEl, statusEl, statusMsg = null;
+  var inputEl, switchEl, embedSwitchEl, statusEl, statusMsg = null;
 
   function initSettings() {
     settingsEl = document.getElementById('settings');
     inputEl = document.getElementById('url-input');
     switchEl = document.getElementById('auto-switch');
+    embedSwitchEl = document.getElementById('embed-switch');
     statusEl = document.getElementById('status');
     items = settingsEl.querySelectorAll('.item');
     inputEl.addEventListener('blur', function () {
@@ -527,7 +534,7 @@
     try { inputEl.blur(); } catch (e) { /* ignore */ }
     settingsEl.className = 'settings hidden';
     if (pendingOpenUrl) { openWhenOnline(pendingOpenUrl); return; }
-    if (pendingDirectUrl) { directTimer = setTimeout(goDirect, 300); return; }
+    if (pendingDirectUrl) { directTimer = setTimeout(goDirect, 100); return; }
     focusSite();
   }
 
@@ -556,6 +563,7 @@
 
   function renderSettings() {
     switchEl.className = state.autoUpdate ? 'switch on' : 'switch';
+    embedSwitchEl.className = state.embed ? 'switch on' : 'switch';
     while (statusEl.firstChild) { statusEl.removeChild(statusEl.firstChild); }
     function line(text, cls) {
       var s = document.createElement('div');
@@ -606,6 +614,8 @@
       case KEY.RIGHT:
         if (items[focusIndex].getAttribute('data-action') === 'toggle') {
           setAuto(code === KEY.RIGHT);
+        } else if (items[focusIndex].getAttribute('data-action') === 'embed') {
+          setEmbed(code === KEY.RIGHT);
         }
         break;
       case KEY.ENTER: activate(items[focusIndex].getAttribute('data-action')); break;
@@ -620,6 +630,7 @@
   function activate(action) {
     switch (action) {
       case 'toggle': setAuto(!state.autoUpdate); break;
+      case 'embed': setEmbed(!state.embed); break;
       case 'edit':
         try { inputEl.focus(); inputEl.select(); } catch (e) { /* ignore */ }
         break;
@@ -650,6 +661,16 @@
       setStatus('Автообновление выключено');
       applyTarget(false);
     }
+  }
+
+  function setEmbed(on) {
+    if (on === state.embed) { return; }
+    state.embed = on;
+    saveState();
+    renderSettings();
+    setStatus(on ? 'Сайт откроется внутри приложения (iframe) после закрытия настроек'
+      : 'Сайт откроется напрямую после закрытия настроек', 'ok');
+    openUrl(currentUrl || targetUrl()); // отложится до закрытия настроек
   }
 
   function saveManual() {
