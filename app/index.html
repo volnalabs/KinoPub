@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CDNViewer</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="app-config.js"></script>
+</head>
+<body>
+<div id="loading" class="loading">
+  <div class="spinner"></div>
+  <div id="loading-text" class="loading-text"></div>
+</div>
+
+<div id="focus-target" tabindex="-1"></div>
+<div id="hint" class="hint hidden">Удерживайте OK — настройки</div>
+
+<div id="settings" class="settings hidden">
+  <div class="panel">
+    <div class="title">Настройки</div>
+
+    <div class="item toggle" data-action="toggle">
+      <span class="label">Автообновление ссылки из GitHub</span>
+      <span id="auto-switch" class="switch"><span class="knob"></span></span>
+    </div>
+
+    <div class="item field" data-action="edit">
+      <div class="label">Адрес сайта</div>
+      <input id="url-input" type="url" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    </div>
+
+    <div class="item button" data-action="save">Сохранить ссылку</div>
+    <div class="item button" data-action="check">Проверить GitHub</div>
+    <div class="item button" data-action="github">Вернуться к ссылке GitHub</div>
+    <div class="item button" data-action="close">Закрыть</div>
+
+    <div id="status" class="status"></div>
+  </div>
+</div>
+
+<script src="js/main.js"></script>
+</body>
+</html>

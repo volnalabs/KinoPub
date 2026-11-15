@@ -1,0 +1,65 @@
+name: Build WGT
+
+on:
+  push:
+    paths:
+      - 'app/**'
+      - 'tools/**'
+      - 'build.sh'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install cryptography lxml
+
+      # Необязательно: секреты репозитория с сертификатами Samsung (base64 от .p12)
+      - name: Certificates
+        env:
+          AUTHOR_P12_BASE64: ${{ secrets.AUTHOR_P12_BASE64 }}
+          DISTRIBUTOR_P12_BASE64: ${{ secrets.DISTRIBUTOR_P12_BASE64 }}
+        run: |
+          if [ -n "$AUTHOR_P12_BASE64" ] && [ -n "$DISTRIBUTOR_P12_BASE64" ]; then
+            mkdir -p certs
+            echo "$AUTHOR_P12_BASE64" | base64 -d > certs/author.p12
+            echo "$DISTRIBUTOR_P12_BASE64" | base64 -d > certs/distributor.p12
+          fi
+
+      - name: Build
+        env:
+          AUTHOR_PASSWORD: ${{ secrets.AUTHOR_PASSWORD }}
+          DISTRIBUTOR_PASSWORD: ${{ secrets.DISTRIBUTOR_PASSWORD }}
+        run: ./build.sh
+
+      - run: rm -rf certs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CDNViewer
+          path: |
+            dist/CDNViewer.wgt
+            dist/CDNViewer-src.zip
+
+      - name: Release
+        if: github.ref_name == github.event.repository.default_branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(sed -n 's/.*<widget[^>]* version="\([^"]*\)".*/\1/p' app/config.xml | head -n1)
+          TAG="v$VERSION"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "CDNViewer $VERSION" --target "$GITHUB_SHA" \
+              --notes "CDNViewer $VERSION для Samsung Smart TV (Tizen)."
+          fi
+          gh release upload "$TAG" dist/CDNViewer.wgt dist/CDNViewer-src.zip remote-config.json --clobber

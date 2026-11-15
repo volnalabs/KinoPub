@@ -1,0 +1,184 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: "SamsungOne", "Samsung Sans", "Roboto", "Helvetica Neue", Arial, sans-serif;
+}
+
+#site {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: #000;
+  z-index: 1;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- Экран загрузки ---------- */
+.loading {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  z-index: 10;
+}
+.spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6vh;
+  height: 6vh;
+  margin: -3vh 0 0 -3vh;
+  border: 0.5vh solid rgba(255, 255, 255, 0.15);
+  border-top-color: #fff;
+  border-radius: 50%;
+  -webkit-box-sizing: border-box;
+  box-sizing: border-box;
+  -webkit-animation: spin 0.9s linear infinite;
+  animation: spin 0.9s linear infinite;
+}
+.loading-text {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  margin-top: 6vh;
+  text-align: center;
+  font-size: 2.2vh;
+  color: rgba(255, 255, 255, 0.55);
+}
+@-webkit-keyframes spin { from { -webkit-transform: rotate(0deg); } to { -webkit-transform: rotate(360deg); } }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+#focus-target {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  outline: none;
+  z-index: 0;
+}
+.hint {
+  position: fixed;
+  right: 3vh;
+  bottom: 3vh;
+  padding: 1.2vh 2.2vh;
+  border-radius: 3vh;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 2vh;
+  z-index: 15;
+}
+
+/* ---------- Настройки ---------- */
+.settings {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 20;
+}
+.panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 62vh;
+  margin-left: -31vh;
+  -webkit-transform: translateY(-50%);
+  transform: translateY(-50%);
+  padding: 3.5vh 4vh;
+  background: #16181d;
+  border-radius: 1.5vh;
+  -webkit-box-shadow: 0 1vh 5vh rgba(0, 0, 0, 0.6);
+  box-shadow: 0 1vh 5vh rgba(0, 0, 0, 0.6);
+  -webkit-box-sizing: border-box;
+  box-sizing: border-box;
+}
+.title {
+  font-size: 3.4vh;
+  font-weight: bold;
+  margin-bottom: 2.5vh;
+}
+.item {
+  position: relative;
+  margin-top: 1.2vh;
+  padding: 1.6vh 2vh;
+  border-radius: 1vh;
+  background: #23262d;
+  font-size: 2.4vh;
+  line-height: 3vh;
+  border: 0.3vh solid transparent;
+}
+.item.focused {
+  background: #2f6fed;
+  border-color: #8fb3ff;
+}
+.item .label { display: block; }
+.toggle .label { padding-right: 9vh; }
+.field .label {
+  font-size: 1.9vh;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 0.8vh;
+}
+.item.focused .label { color: #fff; }
+.switch {
+  position: absolute;
+  right: 2vh;
+  top: 50%;
+  margin-top: -1.8vh;
+  width: 7vh;
+  height: 3.6vh;
+  border-radius: 1.8vh;
+  background: #555a64;
+}
+.switch .knob {
+  position: absolute;
+  top: 0.4vh;
+  left: 0.4vh;
+  width: 2.8vh;
+  height: 2.8vh;
+  border-radius: 50%;
+  background: #fff;
+}
+.switch.on { background: #1fbf6a; }
+.switch.on .knob { left: 3.8vh; }
+#url-input {
+  display: block;
+  width: 100%;
+  font-size: 2.3vh;
+  padding: 1vh 1.2vh;
+  border: 0.2vh solid #3a3f49;
+  border-radius: 0.7vh;
+  background: #0d0e11;
+  color: #fff;
+  outline: none;
+  -webkit-box-sizing: border-box;
+  box-sizing: border-box;
+}
+#url-input:focus { border-color: #fff; }
+.button { text-align: center; }
+.status {
+  margin-top: 2.2vh;
+  font-size: 1.9vh;
+  line-height: 2.7vh;
+  color: rgba(255, 255, 255, 0.75);
+  white-space: pre-line;
+  word-wrap: break-word;
+}
+.status .err { color: #ff7a7a; }
+.status .ok { color: #6fe39f; }
