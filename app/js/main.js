@@ -212,18 +212,39 @@
     if (settingsOpen) { pendingOpenUrl = url; currentUrl = url; return; }
     pendingOpenUrl = null;
     pendingDirectUrl = null;
+    unreachableUrl = null;
     waitingOnline = false;
     currentUrl = url;
     clearTimeout(retryTimer);
     clearTimeout(directTimer);
     showLoading(true);
     var token = ++openToken;
-    resolveScheme(url, function (finalUrl) {
+    resolveScheme(url, function (finalUrl, reachable) {
       if (token !== openToken) { return; }
       if (settingsOpen) { pendingOpenUrl = url; return; } // продолжим после закрытия настроек
-      openedUrl = finalUrl;
-      if (!state.embed || state.noFrame[urlKey(finalUrl)]) { openDirect(finalUrl); } else { openFrame(finalUrl); }
+      if (!reachable) { showUnreachable(url, finalUrl); return; }
+      openResolved(finalUrl);
     });
+  }
+
+  function openResolved(finalUrl) {
+    unreachableUrl = null;
+    clearTimeout(retryTimer);
+    openedUrl = finalUrl;
+    if (!state.embed || state.noFrame[urlKey(finalUrl)]) { openDirect(finalUrl); } else { openFrame(finalUrl); }
+  }
+
+  // Сайт не отвечает с этого ТВ ни по HTTPS, ни по HTTP (чаще всего — блокировка провайдером).
+  // Вместо чёрного экрана показываем причину и повторяем попытку; OK — открыть всё равно.
+  var unreachableUrl = null;
+
+  function showUnreachable(url, finalUrl) {
+    unreachableUrl = finalUrl;
+    var host = (/^[a-z]+:\/\/([^\/?#]+)/i.exec(finalUrl) || [])[1] || finalUrl;
+    showLoading(true, 'Сайт ' + host + ' не отвечает с этого телевизора — возможно, его блокирует провайдер.\n' +
+      'Повтор через 15 с. OK — открыть всё равно, удерживайте OK — настройки');
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(function () { if (unreachableUrl && !settingsOpen) { openUrl(url); } }, 15000);
   }
 
   /* ----- HTTPS → HTTP для старых телевизоров -----
@@ -246,6 +267,14 @@
     function fail() { pending--; if (pending <= 0) { finish(false); } }
     timer = setTimeout(function () { finish(false); }, PROBE_TIMEOUT_MS);
     var bust = '?_=' + new Date().getTime();
+    // fetch no-cors: ответ сайта (любой) — успех, сетевая/TLS-ошибка — отказ. Не зависит от CORS.
+    if (typeof window.fetch === 'function') {
+      pending++;
+      try {
+        window.fetch(origin + '/' + bust, { mode: 'no-cors', credentials: 'omit', cache: 'no-store' })
+          .then(function () { finish(true); }, fail);
+      } catch (e) { fail(); }
+    }
     pending++;
     try {
       var xhr = new XMLHttpRequest();
@@ -268,21 +297,26 @@
 
   function resolveScheme(url, cb) {
     var m = /^https:\/\/([^\/?#]+)(.*)$/i.exec(url);
-    if (!m) { cb(url); return; }
+    if (!m) {
+      var h = /^(http:\/\/[^\/?#]+)/i.exec(url);
+      if (!h) { cb(url, true); return; }
+      probeOrigin(h[1], function (ok) { cb(url, ok); });
+      return;
+    }
     var host = m[1].toLowerCase();
     var httpUrl = 'http://' + m[1] + m[2];
     probeOrigin('https://' + m[1], function (ok) {
       if (ok) {
         if (state.plainHttp[host]) { delete state.plainHttp[host]; saveState(); }
-        cb(url);
+        cb(url, true);
         return;
       }
       probeOrigin('http://' + m[1], function (okHttp) {
         if (okHttp) {
           if (!state.plainHttp[host]) { state.plainHttp[host] = true; saveState(); }
-          cb(httpUrl);
+          cb(httpUrl, true);
         } else {
-          cb(state.plainHttp[host] ? httpUrl : url); // нет связи — как в прошлый раз
+          cb(state.plainHttp[host] ? httpUrl : url, false); // как в прошлый раз
         }
       });
     });
@@ -546,6 +580,10 @@
     if (e.keyCode !== KEY.ENTER) { return; }
     stopEvent(e);
     var wasLong = enterUp();
+    if (!wasLong && !settingsOpen && unreachableUrl) {
+      openResolved(unreachableUrl);
+      return;
+    }
     // Короткое OK в окне настроек — отдаём управление сайту
     if (!wasLong && !settingsOpen && hold.active && frame && frameLoaded) {
       endHold();
@@ -614,6 +652,7 @@
     try { inputEl.blur(); } catch (e) { /* ignore */ }
     settingsEl.className = 'settings hidden';
     if (pendingOpenUrl) { openWhenOnline(pendingOpenUrl); return; }
+    if (unreachableUrl) { openWhenOnline(currentUrl); return; }
     if (pendingDirectUrl) { directTimer = setTimeout(goDirect, 100); return; }
     focusSite();
   }
