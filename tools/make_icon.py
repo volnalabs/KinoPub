@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Генерирует app/icon.png — иконку Smart Hub (512x423, PNG, без прозрачности)."""
+"""Генерирует app/icon.png — иконку Smart Hub (512x512, PNG, без прозрачности).
+
+Квадрат, как у официальных Tizen-приложений: ТВ 2017–2019 годов рисуют иконку
+в квадратной рамке и растягивают другие пропорции."""
 import math
 import os
 from PIL import Image, ImageDraw, ImageFilter
 
-W, H, SS = 512, 423, 4          # размер Samsung TV и коэффициент сглаживания
+W, H, SS = 512, 512, 4          # размер иконки и коэффициент сглаживания
 w, h = W * SS, H * SS
 
 
@@ -16,16 +19,16 @@ def lerp(a, b, t):
 bg = Image.new('RGB', (w, h))
 top, bottom = (16, 30, 62), (6, 9, 20)
 px = bg.load()
-cx, cy = w / 2, h * 0.47
+cx, cy = w / 2, h / 2
 for y in range(h):
     base = lerp(top, bottom, y / (h - 1))
     for x in range(w):
-        d = math.hypot((x - cx) / (w * 0.55), (y - cy) / (h * 0.62))
+        d = math.hypot((x - cx) / (w * 0.55), (y - cy) / (h * 0.55))
         g = max(0.0, 1.0 - d) ** 2.2
         px[x, y] = lerp(base, (46, 104, 230), g * 0.8)
 
 # Кнопка: круг с диагональным градиентом
-r = int(h * 0.30)
+r = int(h * 0.26)
 grad = Image.new('RGB', (2 * r, 2 * r))
 gp = grad.load()
 c1, c2 = (64, 140, 255), (99, 82, 236)
