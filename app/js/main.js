@@ -212,112 +212,119 @@
     if (settingsOpen) { pendingOpenUrl = url; currentUrl = url; return; }
     pendingOpenUrl = null;
     pendingDirectUrl = null;
-    unreachableUrl = null;
     waitingOnline = false;
     currentUrl = url;
     clearTimeout(retryTimer);
     clearTimeout(directTimer);
     showLoading(true);
     var token = ++openToken;
-    resolveScheme(url, function (finalUrl, reachable) {
+    resolveScheme(url, function (finalUrl) {
       if (token !== openToken) { return; }
-      if (settingsOpen) { pendingOpenUrl = url; return; } // продолжим после закрытия настроек
-      if (!reachable) { showUnreachable(url, finalUrl); return; }
+      if (settingsOpen) { pendingOpenUrl = url; return; }
       openResolved(finalUrl);
     });
   }
 
   function openResolved(finalUrl) {
-    unreachableUrl = null;
     clearTimeout(retryTimer);
     openedUrl = finalUrl;
     if (!state.embed || state.noFrame[urlKey(finalUrl)]) { openDirect(finalUrl); } else { openFrame(finalUrl); }
   }
 
-  // Сайт не отвечает с этого ТВ ни по HTTPS, ни по HTTP (чаще всего — блокировка провайдером).
-  // Вместо чёрного экрана показываем причину и повторяем попытку; OK — открыть всё равно.
-  var unreachableUrl = null;
+  /* ----- Проверка доступности конкретного URL -----
+   * Не проверяем корень домена и произвольные favicon-файлы: CDN может отдавать
+   * изображение, даже если главная страница и стандартные иконки недоступны.
+   * Ошибка предварительной проверки не должна блокировать прямое открытие URL. */
+  var openToken = 0, openedUrl = null;
+  var PROBE_TIMEOUT_MS = 6000;
 
-  function showUnreachable(url, finalUrl) {
-    unreachableUrl = finalUrl;
-    var host = (/^[a-z]+:\/\/([^\/?#]+)/i.exec(finalUrl) || [])[1] || finalUrl;
-    showLoading(true, 'Сайт ' + host + ' не отвечает с этого телевизора — возможно, его блокирует провайдер.\n' +
-      'Повтор через 15 с. OK — открыть всё равно, удерживайте OK — настройки');
-    clearTimeout(retryTimer);
-    retryTimer = setTimeout(function () { if (unreachableUrl && !settingsOpen) { openUrl(url); } }, 15000);
+  function isImageUrl(url) {
+    var path = String(url || '').split(/[?#]/)[0].toLowerCase();
+    return /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/.test(path);
   }
 
-  /* ----- HTTPS → HTTP для старых телевизоров -----
-   * На ТВ 2017–2019 годов (Tizen 3/4) нет новых корневых сертификатов, и HTTPS-сайт
-   * открывается пустым чёрным экраном. Если HTTPS до сайта не работает, а HTTP работает,
-   * открываем сайт по HTTP (так делало и официальное приложение Kinopub TV). */
-  var openToken = 0, openedUrl = null;
-  var PROBE_TIMEOUT_MS = 4000;
-  var PROBE_PATHS = ['/favicon.ico', '/logo.png', '/favicon.png', '/apple-touch-icon.png'];
-
-  // cb(true), если с этого ТВ удаётся получить ответ от origin
-  function probeOrigin(origin, cb) {
+  // Для изображений используем Image(): загрузка не зависит от CORS.
+  // Для страниц проверяем сам URL через no-cors fetch или XHR.
+  function probeUrl(url, cb) {
     var done = false, pending = 0, timer = null;
+
     function finish(ok) {
       if (done) { return; }
       done = true;
       clearTimeout(timer);
       cb(ok);
     }
-    function fail() { pending--; if (pending <= 0) { finish(false); } }
+
+    function fail() {
+      if (done) { return; }
+      pending--;
+      if (pending <= 0) { finish(false); }
+    }
+
     timer = setTimeout(function () { finish(false); }, PROBE_TIMEOUT_MS);
-    var bust = '?_=' + new Date().getTime();
-    // fetch no-cors: ответ сайта (любой) — успех, сетевая/TLS-ошибка — отказ. Не зависит от CORS.
-    if (typeof window.fetch === 'function') {
-      pending++;
+
+    if (isImageUrl(url)) {
+      var img = new Image();
+      img.onload = function () { finish(true); };
+      img.onerror = function () { finish(false); };
+      img.src = url;
+      return;
+    }
+
+    var useFetch = typeof window.fetch === 'function';
+    pending = (useFetch ? 1 : 0) + 1;
+
+    if (useFetch) {
       try {
-        window.fetch(origin + '/' + bust, { mode: 'no-cors', credentials: 'omit', cache: 'no-store' })
+        window.fetch(url, { mode: 'no-cors', credentials: 'omit', cache: 'no-store' })
           .then(function () { finish(true); }, fail);
       } catch (e) { fail(); }
     }
-    pending++;
+
     try {
       var xhr = new XMLHttpRequest();
-      xhr.open('GET', origin + '/' + bust, true);
+      xhr.open('GET', url, true);
       xhr.onreadystatechange = function () {
-        if (done) { return; }
-        if (xhr.readyState >= 2 && xhr.status > 0) { finish(true); try { xhr.abort(); } catch (e) { /* ignore */ } }
-        else if (xhr.readyState === 4) { fail(); }
+        if (done || xhr.readyState < 2) { return; }
+        if (xhr.status > 0) {
+          finish(true);
+          try { xhr.abort(); } catch (e) { /* ignore */ }
+        } else if (xhr.readyState === 4) {
+          fail();
+        }
       };
+      xhr.onerror = fail;
+      xhr.ontimeout = fail;
       xhr.send(null);
     } catch (e) { fail(); }
-    for (var i = 0; i < PROBE_PATHS.length; i++) {
-      pending++;
-      var img = new Image();
-      img.onload = function () { finish(true); };
-      img.onerror = fail;
-      img.src = origin + PROBE_PATHS[i] + bust;
-    }
   }
 
   function resolveScheme(url, cb) {
     var m = /^https:\/\/([^\/?#]+)(.*)$/i.exec(url);
-    if (!m) {
-      var h = /^(http:\/\/[^\/?#]+)/i.exec(url);
-      if (!h) { cb(url, true); return; }
-      probeOrigin(h[1], function (ok) { cb(url, ok); });
-      return;
-    }
+    if (!m) { cb(url, true); return; }
+
     var host = m[1].toLowerCase();
     var httpUrl = 'http://' + m[1] + m[2];
-    probeOrigin('https://' + m[1], function (ok) {
-      if (ok) {
+
+    // Сначала проверяем именно изображение/страницу, которую собираемся открыть.
+    probeUrl(url, function (httpsOk) {
+      if (httpsOk) {
         if (state.plainHttp[host]) { delete state.plainHttp[host]; saveState(); }
         cb(url, true);
         return;
       }
-      probeOrigin('http://' + m[1], function (okHttp) {
-        if (okHttp) {
+
+      // HTTP используем только если этот же ресурс действительно загрузился по HTTP.
+      probeUrl(httpUrl, function (httpOk) {
+        if (httpOk) {
           if (!state.plainHttp[host]) { state.plainHttp[host] = true; saveState(); }
           cb(httpUrl, true);
-        } else {
-          cb(state.plainHttp[host] ? httpUrl : url, false); // как в прошлый раз
+          return;
         }
+
+        // Ошибка probe (CORS, тайм-аут или особенности CDN) не доказывает,
+        // что адрес недоступен. Всё равно пробуем открыть исходный HTTPS URL.
+        cb(state.plainHttp[host] ? httpUrl : url, true);
       });
     });
   }
@@ -580,10 +587,6 @@
     if (e.keyCode !== KEY.ENTER) { return; }
     stopEvent(e);
     var wasLong = enterUp();
-    if (!wasLong && !settingsOpen && unreachableUrl) {
-      openResolved(unreachableUrl);
-      return;
-    }
     // Короткое OK в окне настроек — отдаём управление сайту
     if (!wasLong && !settingsOpen && hold.active && frame && frameLoaded) {
       endHold();
@@ -652,7 +655,6 @@
     try { inputEl.blur(); } catch (e) { /* ignore */ }
     settingsEl.className = 'settings hidden';
     if (pendingOpenUrl) { openWhenOnline(pendingOpenUrl); return; }
-    if (unreachableUrl) { openWhenOnline(currentUrl); return; }
     if (pendingDirectUrl) { directTimer = setTimeout(goDirect, 100); return; }
     focusSite();
   }
