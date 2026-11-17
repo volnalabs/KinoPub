@@ -7,8 +7,7 @@
     <content src="index.html"/>
     <feature name="http://tizen.org/feature/screen.size.all"/>
     <access origin="*" subdomains="true"/>
-    <!-- Allow top-level navigation to KinoPub CDN host and its subdomains.
-         Network access permission above does not replace CSP navigation permission. -->
+    <!-- Keep arbitrary target hosts and their HTTP redirects inside the app WebView. -->
     <tizen:allow-navigation>*</tizen:allow-navigation>
     <tizen:privilege name="http://tizen.org/privilege/internet"/>
     <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
