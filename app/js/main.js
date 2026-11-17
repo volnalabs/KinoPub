@@ -212,39 +212,23 @@
     if (settingsOpen) { pendingOpenUrl = url; currentUrl = url; return; }
     pendingOpenUrl = null;
     pendingDirectUrl = null;
-    unreachableUrl = null;
     waitingOnline = false;
     currentUrl = url;
     clearTimeout(retryTimer);
     clearTimeout(directTimer);
     showLoading(true);
     var token = ++openToken;
-    resolveScheme(url, function (finalUrl, reachable) {
+    resolveScheme(url, function (finalUrl) {
       if (token !== openToken) { return; }
-      if (settingsOpen) { pendingOpenUrl = url; return; } // продолжим после закрытия настроек
-      if (!reachable) { showUnreachable(url, finalUrl); return; }
+      if (settingsOpen) { pendingOpenUrl = url; return; }
       openResolved(finalUrl);
     });
   }
 
   function openResolved(finalUrl) {
-    unreachableUrl = null;
     clearTimeout(retryTimer);
     openedUrl = finalUrl;
     if (!state.embed || state.noFrame[urlKey(finalUrl)]) { openDirect(finalUrl); } else { openFrame(finalUrl); }
-  }
-
-  // Сайт не отвечает с этого ТВ ни по HTTPS, ни по HTTP (чаще всего — блокировка провайдером).
-  // Вместо чёрного экрана показываем причину и повторяем попытку; OK — открыть всё равно.
-  var unreachableUrl = null;
-
-  function showUnreachable(url, finalUrl) {
-    unreachableUrl = finalUrl;
-    var host = (/^[a-z]+:\/\/([^\/?#]+)/i.exec(finalUrl) || [])[1] || finalUrl;
-    showLoading(true, 'Сайт ' + host + ' не отвечает с этого телевизора — возможно, его блокирует провайдер.\n' +
-      'Повтор через 15 с. OK — открыть всё равно, удерживайте OK — настройки');
-    clearTimeout(retryTimer);
-    retryTimer = setTimeout(function () { if (unreachableUrl && !settingsOpen) { openUrl(url); } }, 15000);
   }
 
   /* ----- Проверка доступности конкретного URL -----
@@ -256,11 +240,11 @@
 
   function isImageUrl(url) {
     var path = String(url || '').split(/[?#]/)[0].toLowerCase();
-    return /\\.(avif|bmp|gif|jpe?g|png|svg|webp)$/.test(path);
+    return /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/.test(path);
   }
 
-  // Проверяет именно запрошенный ресурс. Для изображений Image() не требует CORS.
-  // Для страниц используем no-cors fetch, а при его отсутствии — обычный XHR.
+  // Для изображений используем Image(): загрузка не зависит от CORS.
+  // Для страниц проверяем сам URL через no-cors fetch или XHR.
   function probeUrl(url, cb) {
     var done = false, pending = 0, timer = null;
 
@@ -287,22 +271,27 @@
       return;
     }
 
-    if (typeof window.fetch === 'function') {
-      pending++;
+    var useFetch = typeof window.fetch === 'function';
+    pending = (useFetch ? 1 : 0) + 1;
+
+    if (useFetch) {
       try {
         window.fetch(url, { mode: 'no-cors', credentials: 'omit', cache: 'no-store' })
           .then(function () { finish(true); }, fail);
       } catch (e) { fail(); }
     }
 
-    pending++;
     try {
       var xhr = new XMLHttpRequest();
       xhr.open('GET', url, true);
       xhr.onreadystatechange = function () {
-        if (done || xhr.readyState !== 4) { return; }
-        if (xhr.status > 0) { finish(true); }
-        else { fail(); }
+        if (done || xhr.readyState < 2) { return; }
+        if (xhr.status > 0) {
+          finish(true);
+          try { xhr.abort(); } catch (e) { /* ignore */ }
+        } else if (xhr.readyState === 4) {
+          fail();
+        }
       };
       xhr.onerror = fail;
       xhr.ontimeout = fail;
@@ -311,12 +300,13 @@
   }
 
   function resolveScheme(url, cb) {
-    var m = /^https:\\/\\/([^\\/?#]+)(.*)$/i.exec(url);
+    var m = /^https:\/\/([^\/?#]+)(.*)$/i.exec(url);
     if (!m) { cb(url, true); return; }
 
     var host = m[1].toLowerCase();
     var httpUrl = 'http://' + m[1] + m[2];
 
+    // Сначала проверяем именно изображение/страницу, которую собираемся открыть.
     probeUrl(url, function (httpsOk) {
       if (httpsOk) {
         if (state.plainHttp[host]) { delete state.plainHttp[host]; saveState(); }
@@ -324,7 +314,7 @@
         return;
       }
 
-      // Переходим на HTTP только когда именно этот ресурс там действительно доступен.
+      // HTTP используем только если этот же ресурс действительно загрузился по HTTP.
       probeUrl(httpUrl, function (httpOk) {
         if (httpOk) {
           if (!state.plainHttp[host]) { state.plainHttp[host] = true; saveState(); }
@@ -332,8 +322,8 @@
           return;
         }
 
-        // Тайм-аут, CORS или неподдерживаемый probe API не доказывают,
-        // что сам адрес недоступен. Передаём исходный URL браузеру в любом случае.
+        // Ошибка probe (CORS, тайм-аут или особенности CDN) не доказывает,
+        // что адрес недоступен. Всё равно пробуем открыть исходный HTTPS URL.
         cb(state.plainHttp[host] ? httpUrl : url, true);
       });
     });
@@ -597,10 +587,6 @@
     if (e.keyCode !== KEY.ENTER) { return; }
     stopEvent(e);
     var wasLong = enterUp();
-    if (!wasLong && !settingsOpen && unreachableUrl) {
-      openResolved(unreachableUrl);
-      return;
-    }
     // Короткое OK в окне настроек — отдаём управление сайту
     if (!wasLong && !settingsOpen && hold.active && frame && frameLoaded) {
       endHold();
@@ -669,7 +655,6 @@
     try { inputEl.blur(); } catch (e) { /* ignore */ }
     settingsEl.className = 'settings hidden';
     if (pendingOpenUrl) { openWhenOnline(pendingOpenUrl); return; }
-    if (unreachableUrl) { openWhenOnline(currentUrl); return; }
     if (pendingDirectUrl) { directTimer = setTimeout(goDirect, 100); return; }
     focusSite();
   }
